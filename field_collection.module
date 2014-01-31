@@ -32,6 +32,7 @@ function field_collection_ctools_plugin_directory($module, $plugin) {
  */
 function field_collection_entity_info() {
   $return['field_collection_item'] = array(
+    'base path' => 'field-collection-item/%field_collection_item',
     'label' => t('Field collection item'),
     'label callback' => 'entity_class_label',
     'uri callback' => 'entity_class_uri',
