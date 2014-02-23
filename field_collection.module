@@ -32,7 +32,6 @@ function field_collection_ctools_plugin_directory($module, $plugin) {
  */
 function field_collection_entity_info() {
   $return['field_collection_item'] = array(
-    'base path' => 'field-collection-item/%field_collection_item',
     'label' => t('Field collection item'),
     'label callback' => 'entity_class_label',
     'uri callback' => 'entity_class_uri',
@@ -382,10 +381,15 @@ class FieldCollectionItemEntity extends Entity {
       list($current_id) = entity_extract_ids($this->hostEntityType, $current_host);
     }
 
-    $this->hostEntity = $entity;
-    $delta = $this->delta();
-    if (isset($entity->{$this->field_name}[$this->langcode][$delta]['entity'])) {
-      $entity->{$this->field_name}[$this->langcode][$delta]['entity'] = $entity;
+    if ($current_id == $recieved_id) {
+      $this->hostEntity = $entity;
+      $delta = $this->delta();
+      if (isset($entity->{$this->field_name}[$this->langcode][$delta]['entity'])) {
+        $entity->{$this->field_name}[$this->langcode][$delta]['entity'] = $entity;
+      }
+    }
+    else {
+      throw new Exception('The host entity cannot be changed.');
     }
   }
 
@@ -536,7 +540,23 @@ class FieldCollectionItemEntity extends Entity {
     if (!empty($this->is_new) && !(isset($this->hostEntityId) || isset($this->hostEntity) || isset($this->hostEntityRevisionId))) {
       throw new Exception("Unable to create a field collection item without a given host entity.");
     }
-
+ 
+    // Copy the values of translatable fields for a new field collection item.
+    if (field_collection_item_is_translatable() && !empty($this->is_new) && $this->langcode == LANGUAGE_NONE) {
+      $host_et_handler = entity_translation_get_handler($this->hostEntityType(), $this->hostEntity());
+      $host_languages = array_keys($host_et_handler->getTranslations()->data);
+      $target_languages = array_diff($host_languages, array($host_et_handler->getLanguage()));
+      $et_handler = entity_translation_get_handler($this->entityType(), $this);
+      $fields = array_keys(field_info_instances('field_collection_item', $this->field_name));
+      foreach ($target_languages as $lang_code) {
+        foreach ($fields as $t_field) {
+          if (isset($this->{$t_field}[$et_handler->getLanguage()])) {
+            $this->{$t_field}[$lang_code] = $this->{$t_field}[$et_handler->getLanguage()];
+          }
+        }
+      }
+    }
+   
     // Only save directly if we are told to skip saving the host entity. Else,
     // we always save via the host as saving the host might trigger saving
     // field collection items anyway (e.g. if a new revision is created).
@@ -980,6 +1000,11 @@ function field_collection_field_insert($host_entity_type, $host_entity, $field, 
  * creation or to save changes to the host entity and its collections at once.
  */
 function field_collection_field_update($host_entity_type, $host_entity, $field, $instance, $langcode, &$items) {
+  // Prevent workbench moderation from deleting field collections on node_save()
+  // during workbench_moderation_store(), when $host_entity->revision == 0.
+  if (!empty($host_entity->workbench_moderation['updating_live_revision'])) {
+    return;
+  }
   // When entity language is changed field values are moved to the new language
   // and old values are marked as removed. We need to avoid processing them in
   // this case.
